@@ -297,5 +297,5 @@ class OverlapScreeningBuilder(MapBuilder):
         new_item = dict(item)
         result = self.overlap_find(item["migration_graph"])
         new_item["overlap_"+"+".join(map(str,self.cn))+"cn_"+"+".join(map(str,self.overlap_cn))+"o"] = not (result is None or len(result.nodes) == 0)
-        new_item["overlap_graph_"+"+".join(map(str,self.cn))+"cn_"+"+".join(map(str,self.overlap_cn))+"o"] = nx.to_dict_of_dicts(result)
+        new_item["overlap_graph_"+"+".join(map(str,self.cn))+"cn_"+"+".join(map(str,self.overlap_cn))+"o"] = result is None ? None : nx.to_dict_of_dicts(result)
         return new_item
