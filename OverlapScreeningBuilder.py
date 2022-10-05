@@ -58,9 +58,9 @@ class OverlapScreeningBuilder(MapBuilder):
         self.overlap_cn = overlap_cn
         self.distance_cutoff = distance_cutoff
         
-        super().__init__(source=migration_graph_store, target=target_store, query=query)
+        super().__init__(source=electrode_store, target=target_store, query=query)
         self.connect()
-        electrode_store.connect()
+        migration_graph_store.connect()
 
     def intersect_sites(self, sites1, sites2, edge_data):
         intersect = []
@@ -289,8 +289,8 @@ class OverlapScreeningBuilder(MapBuilder):
         get info from electrode store for post-screening filter
         """
         for item in super(OverlapScreeningBuilder, self).get_items():
-            eds = self.electrode_store.query_one({"battery_id" : {"$in": [item["battery_id"]]}})
-            item["electrode_doc"] = eds
+            mg_doc = self.migration_graph_store.query_one({"battery_id" : {"$in": [item["battery_id"]]}})
+            item["migration_graph"] = mg_doc["migration_graph"]
             yield item
         
     def unary_function(self, item: dict) -> dict:
