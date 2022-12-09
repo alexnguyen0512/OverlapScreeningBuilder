@@ -290,7 +290,7 @@ class OverlapScreeningBuilder(MapBuilder):
         """
         for item in super(OverlapScreeningBuilder, self).get_items():
             mg_doc = self.migration_graph_store.query_one({"battery_id" : {"$in": [item["battery_id"]]}})
-            item["migration_graph"] = mg_doc["migration_graph"] if mg_doc is not None else None
+            item["migration_graph"] = mg_doc["migration_graph"] if mg_doc is not None and "migration_graph" in mg_doc.keys() else None
             yield item
         
     def unary_function(self, item: dict) -> dict:
