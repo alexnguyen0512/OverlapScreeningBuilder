@@ -1,4 +1,4 @@
-__version__ = "dev1"
+__version__ = "dev2"
 from maggma.stores import MongoStore
 from maggma.builders import MapBuilder
 from pymatgen.core.structure import Structure
@@ -68,11 +68,11 @@ class OverlapScreeningBuilder(MapBuilder):
             coords1 = site1.frac_coords + edge_data
             for site2 in sites2:
                 coords2 = site2.frac_coords + edge_data
-                if site1.specie == site2.specie and (
-                    all(np.isclose(site1.frac_coords, coords2))
-                    or all(np.isclose(coords1, site2.frac_coords))
-                ):
-                    intersect.append(site1)
+                if site1.specie == site2.specie and all(np.isclose(site1.frac_coords, coords2)):
+                    intersect.append(coords2)
+                    continue
+                elif site1.specie == site2.specie and all(np.isclose(coords1, site2.frac_coords)):
+                    intersect.append(coords1)
         return intersect
 
     def has_cycle(self, graph, struct_graph, v):
@@ -124,43 +124,32 @@ class OverlapScreeningBuilder(MapBuilder):
                 min_cn=min(self.cn),
                 minimum_angle_factor=0.05,
             )
-            strategy1 = chemenv_strategies.SimplestChemenvStrategy(
-                se, distance_cutoff=1.4, angle_cutoff=0.2
+            strategy = chemenv_strategies.MultiWeightsChemenvStrategy(
+                structure_environments=se,
+                dist_ang_area_weight=chemenv_strategies.DistanceAngleAreaNbSetWeight(
+                    surface_definition={'type': 'standard_elliptic', 
+                                        'distance_bounds': {'lower': 1.2, 'upper': 1.8}, 
+                                        'angle_bounds': {'lower': 0, 'upper': 0.8}}),
+                self_csm_weight= chemenv_strategies.SelfCSMNbSetWeight(
+                    effective_csm_estimator={'function': 'power2_inverse_decreasing', 'options': {'max_csm': 8.0}},
+                    weight_estimator={'function': 'power2_decreasing_exp', 'options': {'max_csm': 8.0, 'alpha': 1.0}}),
+                delta_csm_weight= chemenv_strategies.DeltaCSMNbSetWeight(
+                    effective_csm_estimator={'function': 'power2_inverse_decreasing', 'options': {'max_csm': 8.0}},
+                    weight_estimator={'function': 'smootherstep', 'options': {'delta_csm_min': 0.5, 'delta_csm_max': 4.0}}),
+                ce_estimator= {
+                    "function": "power2_inverse_power2_decreasing",
+                    "options": {"max_csm": 8.0}
+                }
             )
-            strategy2 = chemenv_strategies.SimplestChemenvStrategy(
-                se, distance_cutoff=1.4, angle_cutoff=0.4
+            lse = LightStructureEnvironments.from_structure_environments(
+                strategy=strategy, structure_environments=se
             )
-            strategy3 = chemenv_strategies.SimplestChemenvStrategy(
-                se, distance_cutoff=1.4, angle_cutoff=0.6
-            )
-            strategy4 = chemenv_strategies.SimplestChemenvStrategy(
-                se, distance_cutoff=2, angle_cutoff=0.2
-            )
-            strategy5 = chemenv_strategies.SimplestChemenvStrategy(
-                se, distance_cutoff=2, angle_cutoff=0.4
-            )
-            strategy6 = chemenv_strategies.SimplestChemenvStrategy(
-                se, distance_cutoff=2, angle_cutoff=0.6
-            )
-            strategies = [
-                strategy1,
-                strategy2,
-                strategy3,
-                strategy4,
-                strategy5,
-                strategy6,
-            ]
-            lse = max(
-                [
-                    LightStructureEnvironments.from_structure_environments(
-                        strategy=strategy, structure_environments=se
-                    )
-                    for strategy in strategies
-                ],
-                key=lambda x: len(
-                    [i for i in x.coordination_environments if i is not None]
-                ),
-            )
+            for isite, _site in enumerate(lse.structure):
+                site_neighbors_sets = lse.neighbors_sets[isite]
+                if site_neighbors_sets is None:
+                    continue
+                if len(site_neighbors_sets) == 0: 
+                    lse.neighbors_sets[isite] = None
             connFinder = connectivity_finder.ConnectivityFinder()
             structConnectivty = connFinder.get_structure_connectivity(lse)
 
@@ -258,22 +247,43 @@ class OverlapScreeningBuilder(MapBuilder):
                                 .get_edge_data(node1, node2)
                                 .values()
                             ]
-                            if all(
-                                [
-                                    len(
-                                        self.intersect_sites(
-                                            path[n1], path[n2], data
+                            overlap_bool = False
+                            for data in edge_data:
+                                intersect = self.intersect_sites(path[n1], path[n2], data)
+                                if len(intersect) not in self.overlap_cn:
+                                    continue
+                                intersect_centroid = np.mean(intersect, axis=0)
+                                lgf2 = LocalGeometryFinder()
+                                struct_cp = struct.copy()
+                                struct_cp.insert(0, self.specie, intersect_centroid)
+                                #struct_cp.to(filename="vesta/8717_Mg_test.cif")
+                                lgf2.setup_structure(struct_cp)
+                                se_cp = lgf2.compute_structure_environments(
+                                            maximum_distance_factor=self.distance_cutoff,
+                                            only_atoms=[self.specie],  # must identify specie interested in
+                                            max_cn=max(self.overlap_cn),
+                                            min_cn=min(self.overlap_cn),
+                                            minimum_angle_factor=0.05,
                                         )
-                                    )
-                                    not in self.overlap_cn
-                                    for data in edge_data
-                                ]
-                            ):
+                                lse_cp = LightStructureEnvironments.from_structure_environments(
+                                            strategy=strategy, structure_environments=se_cp
+                                        )
+                                ces = lse_cp.coordination_environments
+                                if ces[0] is not None and len(ces[0]) > 0:
+                                    if (lse.coordination_environments[n1.i_central_site] is not None 
+                                        and lse.coordination_environments[n2.i_central_site] is not None):
+                                        end_point_csm = np.average([min(lse.coordination_environments[n1.i_central_site], 
+                                                                        key=lambda i: i["csm"])["csm"],
+                                                                    min(lse.coordination_environments[n2.i_central_site],
+                                                                        key=lambda i: i["csm"])["csm"]])
+                                        if abs(min(ces[0], key=lambda i: i["csm"])["csm"] - end_point_csm) < end_point_csm*0.5:
+                                            overlap_bool = True
+                                            edge_jimages[(n1, n2)] = {
+                                                "to_jimage": edge_data,
+                                            }
+                                            break
+                            if overlap_bool == False:
                                 env_graph.remove_edge(n1, n2)
-                            else:
-                                edge_jimages[(n1, n2)] = {
-                                    "to_jimage": edge_data,
-                                }
 
             nx.set_edge_attributes(env_graph, edge_jimages)
             
@@ -290,7 +300,7 @@ class OverlapScreeningBuilder(MapBuilder):
         """
         for item in super(OverlapScreeningBuilder, self).get_items():
             mg_doc = self.migration_graph_store.query_one({"battery_id" : {"$in": [item["battery_id"]]}})
-            item["migration_graph"] = mg_doc["migration_graph"] if mg_doc is not None else None
+            item["migration_graph"] = mg_doc["migration_graph"] if mg_doc is not None and "migration_graph" in mg_doc.keys() else None
             yield item
         
     def unary_function(self, item: dict) -> dict:
