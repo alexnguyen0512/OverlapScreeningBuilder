@@ -28,16 +28,17 @@ from pymatgen.analysis.chemenv.utils.defs_utils import AdditionalConditions
 
 class OverlapScreeningBuilder(MapBuilder):
     """
-    Look for existing periodic paths with overlapping polyhedra
+    Look for periodic paths with the overlapping polyhedra motif. Polyhedra are identified with ChemEnv LocalGeometryFinder.
+    
     Args:
-    migration_graph_store (Store): store of electrodes doc with
-        migration_graph (output of migration graph builder)
+    migration_graph_store (Store): store of migration graphs docs (output of migration graph builder)
+    electrode_store (Store): store of electrode docs - for information on voltage, stability, etc.,
+    target_store (Store): store for overlap results,
     specie (str): specie of interest
     coordination ([int]): coordination number for the wi sites
-    overlap ([int]): degree of overlap to look for between polyhedral wi sites
+    overlap ([int]): degrees of overlap to look for between wi polyhedral sites
     distance_cutoff (float): distance between polyhedra, cutoff to determine
         structure connectivity
-    Call overlap_find() to return (battery_id, paths)
     """
 
     def __init__(
